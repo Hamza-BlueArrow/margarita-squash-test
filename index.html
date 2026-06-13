@@ -825,7 +825,7 @@ footer {
       <div id="adminControls" style="display:none;">
         <div class="admin-loggedin-tag">&#128274; Admin unlocked for this session</div>
         <div class="admin-actions">
-          <button class="btn fire sm" onclick="drawGroups()" id="drawBtn">Draw groups &amp; lock registration</button>
+          <button class="btn fire sm" onclick="drawGroups()" id="drawBtn">Draw groups</button>
           <button class="btn secondary sm" onclick="toggleLateForm()" id="lateBtn" style="display:none;">Add late player</button>
           <button class="btn secondary sm" onclick="toggleManagePlayers()" id="manageBtn" style="display:none;">Manage players</button>
         </div>
@@ -895,7 +895,7 @@ const firebaseConfig = {
 };
 const fbApp = initializeApp(firebaseConfig);
 const db = getDatabase(fbApp);
-const stateRef = ref(db, 'tournament-demo');
+const stateRef = ref(db, 'tournament');
 
 let state = { players: [], locked: false, groups: { A: [], B: [] }, matches: [], rankings: {} };
 let activeMatchId = null;
@@ -1078,7 +1078,8 @@ window.swapCourt = swapCourt;
 
 // LATE FORM TOGGLE
 function toggleLateForm() {
-  document.getElementById('lateForm').classList.toggle('open');
+  const el = document.getElementById('lateForm');
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
 }
 window.toggleLateForm = toggleLateForm;
 
@@ -1137,7 +1138,7 @@ function shuffle(arr) {
 
 async function drawGroups() {
   if (state.players.length < 4) { alert('Need at least 4 players.'); return; }
-  if (!confirm('Lock registration and draw groups?')) return;
+  if (!confirm('Ready to shuffle the deck? ' + state.players.length + ' players will be drawn into groups and the tournament begins. Let\'s go?')) return;
   const shuffled = shuffle(state.players);
   const sA = Math.ceil(shuffled.length / 2);
   state.groups.A = shuffled.slice(0, sA).map(p => p.id);
@@ -1157,14 +1158,17 @@ function generateMatches() {
   const buildRR = (ids, group) => {
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
-        matches.push({ id: uid(), group, p1: ids[i], p2: ids[j], court: null, games: [], referee: '', completed: false, winner: null, isFinal: false });
+        matches.push({ id: uid(), group, p1: ids[i], p2: ids[j], court: null, games: [], referee: '', completed: false, winner: null, isFinal: false, isThirdPlace: false });
       }
     }
   };
   buildRR(state.groups.A, 'A');
   buildRR(state.groups.B, 'B');
   matches.forEach((m, i) => { m.court = (i % 2 === 0) ? 1 : 2; });
-  matches.push({ id: uid(), group: 'F', p1: null, p2: null, court: 1, games: [], referee: '', completed: false, winner: null, isFinal: true });
+  // 3rd place match on The Furnace (Court 2)
+  matches.push({ id: uid(), group: '3rd', p1: null, p2: null, court: 2, games: [], referee: '', completed: false, winner: null, isFinal: false, isThirdPlace: true });
+  // Final on The Cooler (Court 1)
+  matches.push({ id: uid(), group: 'F', p1: null, p2: null, court: 1, games: [], referee: '', completed: false, winner: null, isFinal: true, isThirdPlace: false });
   return matches;
 }
 
@@ -1413,17 +1417,29 @@ function groupStandings(group) {
 
 function updateFinalists() {
   const final = state.matches.find(m => m.isFinal);
+  const third = state.matches.find(m => m.isThirdPlace);
   if (!final) return;
   const allA = state.matches.filter(m => m.group === 'A').every(m => m.completed);
   const allB = state.matches.filter(m => m.group === 'B').every(m => m.completed);
-  if (allA && allB && !final.completed) {
+  if (allA && allB) {
     const sA = groupStandings('A'), sB = groupStandings('B');
-    if (sA[0] && sB[0]) { final.p1 = sA[0].id; final.p2 = sB[0].id; }
+    if (sA[0] && sB[0] && !final.completed) {
+      final.p1 = sA[0].id; final.p2 = sB[0].id;
+    }
+    if (third && sA[1] && sB[1] && !third.completed) {
+      third.p1 = sA[1].id; third.p2 = sB[1].id;
+    }
   }
 }
 
 function render() {
   renderRegister(); renderTournament(); renderRankings(); renderAdmin(); updateStatusBadge();
+
+  // Auto-manage card visibility based on tournament state
+  if (state.locked) {
+    document.getElementById('tournamentBody').classList.add('open');
+    document.getElementById('registerBody').classList.remove('open');
+  }
 }
 
 function renderRegister() {
@@ -1473,9 +1489,26 @@ function renderTournament() {
   const groupA = state.matches.filter(m => m.group === 'A');
   const groupB = state.matches.filter(m => m.group === 'B');
   const final = state.matches.find(m => m.isFinal);
+  const third = state.matches.find(m => m.isThirdPlace);
   const sA = groupStandings('A'), sB = groupStandings('B');
+  const isAdmin = sessionStorage.getItem('margaritaAdmin') === 'true';
 
   let html = '';
+
+  // Champion banner (shown at top when final is completed)
+
+  if (final && final.completed) {
+    const loserId = final.winner === final.p1 ? final.p2 : final.p1;
+    let champHtml = `<div class="final-banner" style="margin-bottom:20px;background:linear-gradient(135deg, rgba(255,209,102,0.12), rgba(255,107,53,0.06));">
+      <div class="f-label">Margarita Open Champion</div>
+      <div class="f-matchup" style="font-size:32px;">&#127942; ${escapeHtml(playerName(final.winner))}</div>
+      <div style="font-family:'Oswald',sans-serif;font-size:14px;color:var(--ink-dim);margin-top:8px;">&#129352; Runner-up: ${escapeHtml(playerName(loserId))}</div>`;
+    if (third && third.completed && third.winner) {
+      champHtml += `<div style="font-family:'Oswald',sans-serif;font-size:13px;color:var(--ink-dim);margin-top:4px;">&#129353; 3rd place: ${escapeHtml(playerName(third.winner))}</div>`;
+    }
+    champHtml += `</div>`;
+    html = champHtml + html;
+  }
 
   // Courts
   html += `<div class="courts-grid">
@@ -1495,9 +1528,30 @@ function renderTournament() {
   html += groupB.map(matchCardHtml).join('');
   html += standingsTableHtml(sB);
 
+  // 3rd place match
+  if (third) {
+    if (third.p1 && third.p2) {
+      let thirdBtn = '';
+      if (third.completed) {
+        if (isAdmin) thirdBtn = `<div class="match-btn"><button class="btn secondary sm" onclick="openScoreModal('${third.id}')">Edit scorecard</button></div>`;
+      } else {
+        thirdBtn = `<div class="match-btn"><button class="btn secondary sm" onclick="openScoreModal('${third.id}')">Enter result</button></div>`;
+      }
+      html += `<div class="final-banner" style="border-color:var(--cooler);background:linear-gradient(135deg, rgba(0,180,216,0.06), rgba(0,150,199,0.06));">
+        <div class="f-label" style="color:var(--cooler);">3rd Place &middot; The Furnace (Court 2)</div>
+        <div class="f-matchup" style="font-size:22px;">${escapeHtml(playerName(third.p1))} <em style="opacity:0.4;color:var(--ink-dim);"> vs </em> ${escapeHtml(playerName(third.p2))}</div>
+        ${third.completed
+          ? `<div class="f-status">3rd place: ${escapeHtml(playerName(third.winner))}</div>`
+          : `<div class="f-status" style="color:var(--cooler);">Awaiting battle</div>`}
+        ${thirdBtn}
+      </div>`;
+    } else {
+      html += `<div class="final-banner" style="border-color:var(--cooler);"><div class="f-label" style="color:var(--cooler);">3rd Place Match</div><div class="f-matchup" style="font-size:16px;color:var(--ink-dim);">Group runners-up face off after group stage</div></div>`;
+    }
+  }
+
   // Final
   if (final) {
-    const isAdmin = sessionStorage.getItem('margaritaAdmin') === 'true';
     if (final.p1 && final.p2) {
       let finalBtn = '';
       if (final.completed) {
@@ -1531,7 +1585,7 @@ function matchCardHtml(m) {
   const isAdmin = sessionStorage.getItem('margaritaAdmin') === 'true';
   const liveBadge = (m.liveNow && !m.completed) ? `<div class="live-now-badge"><span class="live-now-dot"></span>On court now</div>` : '';
   const liveToggle = (isAdmin && !m.completed && m.p1 && m.p2)
-    ? `<button class="btn secondary sm" onclick="toggleLiveNow('${m.id}')" style="margin-left:6px;">${m.liveNow ? 'Unmark live' : 'Mark on court'}</button>`
+    ? `<button class="btn secondary sm" onclick="toggleLiveNow('${m.id}')" style="margin-left:6px;">${m.liveNow ? 'End match' : 'Start match'}</button>`
     : '';
   const swapBtn = (isAdmin && !m.completed && !m.isFinal)
     ? `<button class="btn secondary sm" onclick="swapCourt('${m.id}')" style="margin-left:6px;">Swap court</button>`
@@ -1556,7 +1610,13 @@ function matchCardHtml(m) {
 
 function standingsTableHtml(rows) {
   if (!rows.length) return '';
-  return `<table><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th><th>L</th><th>G&plusmn;</th><th>Pts&plusmn;</th></tr></thead><tbody>${rows.map((r,i) => `<tr><td class="num">${i+1}</td><td>${escapeHtml(playerName(r.id))}</td><td class="num">${r.played}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${(r.gamesFor-r.gamesAgainst)>=0?'+':''}${r.gamesFor-r.gamesAgainst}</td><td class="num">${(r.pointsFor-r.pointsAgainst)>=0?'+':''}${r.pointsFor-r.pointsAgainst}</td></tr>`).join('')}</tbody></table>`;
+  const ranked = rows.map(r => ({ ...r, pts: r.wins * 3 })).sort((a,b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    const ad = a.gamesFor - a.gamesAgainst, bd = b.gamesFor - b.gamesAgainst;
+    if (bd !== ad) return bd - ad;
+    return (b.pointsFor - b.pointsAgainst) - (a.pointsFor - a.pointsAgainst);
+  });
+  return `<table><thead><tr><th>#</th><th>Player</th><th>Pts</th><th>P</th><th>W</th><th>L</th><th>G&plusmn;</th></tr></thead><tbody>${ranked.map((r,i) => `<tr><td class="num">${i+1}</td><td>${escapeHtml(playerName(r.id))}</td><td class="num"><strong style="color:var(--gold);">${r.pts}</strong></td><td class="num">${r.played}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${(r.gamesFor-r.gamesAgainst)>=0?'+':''}${r.gamesFor-r.gamesAgainst}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function renderRankings() {
