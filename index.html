@@ -895,7 +895,7 @@ const firebaseConfig = {
 };
 const fbApp = initializeApp(firebaseConfig);
 const db = getDatabase(fbApp);
-const stateRef = ref(db, 'tournament');
+const stateRef = ref(db, 'tournament-demo');
 
 let state = { players: [], locked: false, groups: { A: [], B: [] }, matches: [], rankings: {} };
 let activeMatchId = null;
